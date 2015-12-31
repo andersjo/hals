@@ -213,8 +213,11 @@ class ArcEager:
     def is_final(self, state):
         return len(state.stack) == 0 and len(state.buffer) == 1
 
+    def extract_parse(self, state):
+        return state.heads[:-1], state.labels[:-1]
+
     def allowed(self, state):
-        # Take labels int account
+        # Take labels into account
         return [i for i, action in enumerate(ARC_EAGER)
                 if action.is_valid(state)]
 
