@@ -2,13 +2,14 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+import time
 
 from arc_eager import ArcEager
 from feature import init_embeddings, make_zhang_simplified_model
 from fnn_learner import FnnLearner
 from learner import RandomLearner
 from sentences import Corpus, read_sentences
-from transition_parser import TransitionParser
+from transition_parser.threaded_parser import ThreadedTransitionParser
 
 parser = argparse.ArgumentParser(description="Hals, a transition-based dependency parser")
 parser.add_argument('--train', help="Training set", type=Path)
@@ -63,8 +64,17 @@ fnn_learner = FnnLearner(tf_model)
 # learner = random_learner
 learner = fnn_learner
 
-parser = TransitionParser(arc_eager_trans, learner)
-print("Parsing many")
-parser.parse_many(dev_sents)
-print("Parsing end")
-# parser.fit(train_sents, dev_sents)
+parser = ThreadedTransitionParser(arc_eager_trans, learner)
+parser.fit(train_sents, dev_sents)
+
+# many_sents = []
+# for sent in dev_sents:
+#     for i in range(5):
+#         many_sents.append(sent)
+
+# print("Parsing many")
+# time_begin = time.perf_counter()
+# parser.parse_many(many_sents)
+# elapsed = time.perf_counter() - time_begin
+# print("Parsing end. Elapsed: ", elapsed)
+# print("Sents per sec: {}".format(len(many_sents) / elapsed))

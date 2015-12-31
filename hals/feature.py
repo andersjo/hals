@@ -117,11 +117,16 @@ class FeatureTemplate:
 class LearnerModel:
     def __init__(self):
         self.fillers = []
+        self.num_classes = None
+
+        # Placeholders
+        self.gold_ph = None
+        self.dropout_keep_p_ph = None
+
+        # Graph nodes
         self.loss = None
         self.logits = None
-        self.gold_ph = None
         self.pred = None
-        self.num_classes = None
 
         self._token_role_assignment = TokeRoleAssignment()
 
@@ -136,24 +141,45 @@ class LearnerModel:
 
         return feed_dict
 
+    def prepare_feed_batch(self, sentences, states):
+        role_assignment_list = []
+        for state in states:
+            self._token_role_assignment.update(state)
+            role_assignment_list.append(self._token_role_assignment.indices.copy())
+
+        feed_dict = {}
+        for filler in self.fillers:
+            filler.update_feed(list(zip(sentences, role_assignment_list)), feed_dict)
+
+        return feed_dict
+
+
+
+
+
+
+        pass
+
 
 class NsPlaceholderFiller:
     """
     This class exposes three public placeholders:
 
-       `ph_input` and `ph_weights`, which are both [batch_size, num_features, num_roles] tensors.
-       `ph_lengths`, a [batch_size] tensor with the actual lengths for the current input.
+       `input_ph` and `weights_ph`, which are both [batch_size, num_features, num_roles] tensors.
+       `lengths_ph`, a [batch_size] tensor with the actual lengths for the current input.
     """
 
     def __init__(self, ns, ns_max_len, token_roles):
         self.namespace = ns
         self.token_roles = token_roles
         self.ns_max_len = ns_max_len
-        self.ph_input = tf.placeholder(tf.int32, [None, ns_max_len, len(token_roles)],
+
+        # Placeholders
+        self.input_ph = tf.placeholder(tf.int32, [None, ns_max_len, len(token_roles)],
                                        name='input_ph_ns_' + ns)
-        self.ph_weights = tf.placeholder(tf.float32, [None, ns_max_len, len(token_roles)],
+        self.weights_ph = tf.placeholder(tf.float32, [None, ns_max_len, len(token_roles)],
                                          name='weights_ph_ns_' + ns)
-        self.ph_lengths = tf.placeholder(tf.int32, [None, 1],
+        self.lengths_ph = tf.placeholder(tf.int32, [None, 1],
                                          name='lengths_ph_ns_' + ns)
 
     def update_feed(self, sent_and_role_assignments, feed_dict):
@@ -185,27 +211,27 @@ class NsPlaceholderFiller:
                 lengths[instance_i, 0] = len(token_features)
 
         # Map placeholders to values
-        feed_dict[self.ph_input] = input_
-        feed_dict[self.ph_weights] = weights
-        feed_dict[self.ph_lengths] = lengths
+        feed_dict[self.input_ph] = input_
+        feed_dict[self.weights_ph] = weights
+        feed_dict[self.lengths_ph] = lengths
 
 
-def embed_ns(ph_filler, embeds, name, scale=True):
+def embed_ns(ph_filler, embeds, name, reduce_fn=tf.reduce_mean, scale=True):
     with tf.name_scope('embed_' + name):
-        embedded_feats = tf.gather(embeds, ph_filler.ph_input)
+        embedded_feats = tf.gather(embeds, ph_filler.input_ph)
 
         if scale:
-            scaling = tf.expand_dims(ph_filler.ph_weights, -1)
+            scaling = tf.expand_dims(ph_filler.weights_ph, -1)
             embedded_feats = tf.mul(embedded_feats, scaling)
 
-        reduced_by_feat = tf.reduce_mean(embedded_feats, 1)
+        reduced_by_feat = reduce_fn(embedded_feats, 1)
 
-        # TODO this cannot be the best way to flatten a tensor to [batch_size, -1]
+        # TODO this cannot be the best way to flatten a tensor to [batch_size, -1] ?
         batch_size_node = tf.reshape(tf.shape(reduced_by_feat)[0], [1, 1])
         shape_node = tf.concat(0, [batch_size_node, tf.reshape(tf.constant(-1), [1, 1])])
         shape_node = tf.squeeze(shape_node)
 
-        num_units = embeds.get_shape()[1] * ph_filler.ph_input.get_shape()[2]
+        num_units = embeds.get_shape()[1] * ph_filler.input_ph.get_shape()[2]
 
         return tf.reshape(reduced_by_feat, shape_node), num_units.value
 
@@ -225,7 +251,7 @@ def make_zhang_simplified_input(ns_embeddings):
         filler = NsPlaceholderFiller(ns, 1, roles)
         fillers.append(filler)
 
-        input_for_ns, num_units_for_ns = embed_ns(filler, ns_embeddings[ns], 'ns_' + ns)
+        input_for_ns, num_units_for_ns = embed_ns(filler, ns_embeddings[ns], 'ns_' + ns, scale=True)
         inputs.append(input_for_ns)
         num_units += num_units_for_ns
 
@@ -271,8 +297,13 @@ def make_zhang_simplified_model(feat_embeddings_by_ns, num_classes, num_hidden) 
     input_node, fillers, num_units = make_zhang_simplified_input(feat_embeddings_by_ns)
     last_hidden_node = make_hidden(input_node, num_units, num_hidden)
 
+    # Apply dropout to last layer
+    dropout_keep_p_ph = tf.placeholder(tf.float32, shape=[], name='dropout_keep_p')
+    last_hidden_node = tf.nn.dropout(last_hidden_node, dropout_keep_p_ph)
+
+
     # TODO consider how to model more structured outputs, taking groups into account
-    gold_ph = tf.placeholder(tf.float32, [None, num_classes])
+    gold_ph = tf.placeholder(tf.float32, [None, num_classes], name='gold_ph')
     loss, pred, logits = make_output_and_loss(last_hidden_node, num_hidden, num_classes, gold_ph)
 
     # Update model
@@ -280,6 +311,7 @@ def make_zhang_simplified_model(feat_embeddings_by_ns, num_classes, num_hidden) 
     model.num_classes = num_classes
     model.fillers = fillers
     model.gold_ph = gold_ph
+    model.dropout_keep_p_ph = dropout_keep_p_ph
     model.loss = loss
     model.pred = pred
     model.logits = logits

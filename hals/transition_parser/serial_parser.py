@@ -1,11 +1,10 @@
 import random
-
 import numpy as np
 
 from sentences import Sentence
 
 
-class TransitionParser:
+class SerialParser:
     def __init__(self, transition_system, learner, num_epochs=100):
         self.transition_system = transition_system
         self.learner = learner
@@ -35,6 +34,7 @@ class TransitionParser:
         for sent in sentences:
             yield self._parse_sent(sent)
 
+    # TODO refactor to extract the scoring part. Maybe introduce some class representing a finished parse.
     def score_parses(self, sentences):
         correct_labels = 0
         correct_edges = 0
@@ -62,12 +62,12 @@ class TransitionParser:
         while not t_sys.is_final(state):
             allowed = t_sys.allowed(state)
 
-            score_pred_actions = self.learner.score(sent, state, allowed)
+            score_pred_actions = self.learner.score_actions(sent, state, allowed)
             best_pred_action_index = np.argmax(score_pred_actions)
             action = allowed[best_pred_action_index]
             t_sys.perform(state, action)
 
-        return state.heads[:-1], state.labels[:-1]
+        return t_sys.extract_parse(state)
 
     def _train_sent(self, sent: Sentence):
         t_sys = self.transition_system
@@ -81,7 +81,7 @@ class TransitionParser:
             action_costs = ref_policy(state, sent, allowed)
             min_cost = action_costs.min()
 
-            score_pred_actions = self.learner.score_and_update(sent, state, allowed, action_costs)
+            score_pred_actions = self.learner.score_actions_and_train(sent, state, allowed, action_costs)
             best_pred_action_index = np.argmax(score_pred_actions)
 
             self.num_total += 1
