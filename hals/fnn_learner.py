@@ -3,13 +3,14 @@ from typing import List
 import numpy as np
 import tensorflow as tf
 
-from arc_eager import ArcEagerParseState
 from feature import LearnerModel
 from sentences import Sentence
+from transition_system.arc_eager import ArcEagerParseState
 
 
 class FnnLearner:
-    def __init__(self, model: LearnerModel, optimizer=tf.train.GradientDescentOptimizer(0.01), clip_gradient=True):
+    def __init__(self, model: LearnerModel, optimizer=tf.train.GradientDescentOptimizer(0.001),
+                 clip_gradient=True):
         self.model = model
 
         # Add a train step

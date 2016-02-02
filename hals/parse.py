@@ -1,80 +1,46 @@
 import argparse
 from pathlib import Path
 
-import pandas as pd
-import time
-
-from arc_eager import ArcEager
-from feature import init_embeddings, make_zhang_simplified_model
-from fnn_learner import FnnLearner
-from learner import RandomLearner
-from sentences import Corpus, read_sentences
-from transition_parser.threaded_parser import ThreadedTransitionParser
+import transition_system
+from cli.util import type_with_ns
+from cli.train import train
+from cli.predict import predict
 
 parser = argparse.ArgumentParser(description="Hals, a transition-based dependency parser")
-parser.add_argument('--train', help="Training set", type=Path)
-parser.add_argument('--dev', help="Development set", type=Path)
-parser.add_argument('--ns-init', help="Initialize the embeddings for features in a namespace from this HDF-file."
+subparsers = parser.add_subparsers()
+
+# Training
+train_parser = subparsers.add_parser('train', help="Train a model")
+train_parser.add_argument('--builder', help="Model builder")
+train_parser.add_argument('--train', help="Training set", type=Path)
+train_parser.add_argument('--dev', help="Development set", type=Path)
+train_parser.add_argument('--ns-init', help="Initialize the embeddings for features in a namespace from this HDF-file."
                                       "Specify as 'ns:filename'. Can occur multiple times.",
-                    action='append', default=[])
-parser.add_argument('--ns-dim', help="Size of embedding for the given namespace. Format is 'ns:dim'. "
+                          type=type_with_ns(Path), action='append', default=[])
+train_parser.add_argument('--ns-dim', help="Size of embedding for the given namespace. Format is 'ns:dim'. "
                                      "Can occur multiple times.",
-                    action='append', default=[])
+                    action='append', default=[], type=type_with_ns(int))
+train_parser.set_defaults(fn=train)
+
+transition_system_group = train_parser.add_argument_group('Transition system')
+transition_system.add_train_args(transition_system_group)
+
+model_group = train_parser.add_argument_group('Model builder')
+model_group.add_argument('--ns-default-token-role')
+model_group.add_argument('--ns-token-role')
+model_group.add_argument('--role-set', help="Predefined role set.")
+model_group.add_argument('--ns-role-set', help="Override roles for a given namespace.")
+
+
+learner_group = train_parser.add_argument_group('Learner')
+learner_group.add_argument('--early-stop-after',
+                           help="Terminate after this number of epochs with no increase in performance on dev set.",
+                           type=int, default=3)
+learner_group.add_argument('--clip-gradient', action='store_true')
+
+predict_parser = subparsers.add_parser('predict', help="Use a trained model to make predictions")
+predict_parser.set_defaults(fn=predict)
+
 args = parser.parse_args()
+args.fn(args)
 
-num_labels = 1
-
-# Read data
-train_sents = list(read_sentences(str(args.train)))
-dev_sents = list(read_sentences(str(args.train)))
-# `Corpus` is really feature mappings
-corpus = Corpus()
-corpus.add_dataset('train', train_sents)
-corpus.freeze()
-corpus.add_dataset('dev', dev_sents)
-corpus.update_reverse_mapping()
-
-# Initialize embeddings
-# Some default values
-ns_embedding_sizes = {'w': 100, 'p': 12}
-pretrained = {}
-for ns_init in args.ns_init:
-    ns, filename = ns_init.split(":")
-    pretrained[ns] = pd.read_hdf(filename)
-    ns_embedding_sizes[ns] = pretrained[ns].shape[1]
-
-for ns_dim in args.ns_dim:
-    ns, dim_str = ns_dim.split(":")
-    dim = int(dim_str)
-    if ns in pretrained:
-        assert pretrained[ns].shape[1] != dim, "Incompatible embedding sizes from 'ns-init' and 'ns-dim'"
-    ns_embedding_sizes[ns] = dim
-
-feat_embeddings = init_embeddings(corpus, ns_embedding_sizes, pretrained)
-
-# Transition system
-arc_eager_trans = ArcEager(num_labels)
-
-# Build tensorflow model for learner
-tf_model = make_zhang_simplified_model(feat_embeddings, arc_eager_trans.num_actions(), num_hidden=100)
-
-# Initialize parser
-random_learner = RandomLearner(arc_eager_trans.num_actions())
-fnn_learner = FnnLearner(tf_model)
-# learner = random_learner
-learner = fnn_learner
-
-parser = ThreadedTransitionParser(arc_eager_trans, learner)
-parser.fit(train_sents, dev_sents)
-
-# many_sents = []
-# for sent in dev_sents:
-#     for i in range(5):
-#         many_sents.append(sent)
-
-# print("Parsing many")
-# time_begin = time.perf_counter()
-# parser.parse_many(many_sents)
-# elapsed = time.perf_counter() - time_begin
-# print("Parsing end. Elapsed: ", elapsed)
-# print("Sents per sec: {}".format(len(many_sents) / elapsed))

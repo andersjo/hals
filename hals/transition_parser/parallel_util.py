@@ -1,26 +1,39 @@
 from collections import namedtuple
 from queue import Queue
 from threading import Thread
+from typing import List, Any
+import numpy as np
 
 from tensorflow.python.training.coordinator import Coordinator
 
+from sentences import Sentence
+
+SentenceBatch = namedtuple('SentenceBatch', 'ids feed_dict sents states allowed_list action_costs_list')
 
 class ParallelParse:
     """
     Data structures for parsing in parallel via threads
     """
-    def __init__(self, sentences, score_batch, advance_batch, prepare_feed, transition_system, batch_size=64):
+    def __init__(self, sentences, parser, batch_size=64):
         self.sentences = sentences
         self.batch_size = batch_size
         self.batches = Queue()
         self.needs_scoring = Queue()
         self.num_left = len(sentences)
         self.states = []
-        self.transition_system = transition_system
+        self.transition_system = parser.transition_system
 
-        self.prepare_feed = prepare_feed
-        self.score_batch = score_batch
-        self.advance_batch = advance_batch
+        self.ref_policy = self.transition_system.reference_policy()
+        self.parser = parser
+
+    def prepare_feed(self, sents: List[Sentence], states: List[Any]) -> dict:
+        raise NotImplementedError()
+
+    def score_batch(self, batch: SentenceBatch):
+        raise NotImplementedError()
+
+    def advance_batch(self, batch: SentenceBatch, batch_scores: List[np.ndarray]):
+        raise NotImplementedError()
 
     def parse(self):
         t_sys = self.transition_system
@@ -52,19 +65,28 @@ class ParallelParse:
             allowed_list.append(self.transition_system.allowed(state))
         return allowed_list
 
-SentenceBatch = namedtuple('SentenceBatch', 'ids feed_dict sents states allowed_list')
+    def action_costs(self, states, sents, allowed_list):
+        action_costs_list = []
+
+        for state, sent, allowed in zip(states, sents, allowed_list):
+            action_costs = self.ref_policy(state, sent, allowed)
+            action_costs_list.append(action_costs)
+
+        return action_costs_list
 
 
 def prepare_batches(coord: Coordinator, pp: ParallelParse):
     def build_batch(sent_ids):
         sents = [pp.sentences[sent_id] for sent_id in sent_ids]
         states = [pp.states[sent_id] for sent_id in sent_ids]
+        allowed_list = pp.allowed_batch(states)
 
         return SentenceBatch(ids=sent_ids,
                              sents=sents,
                              states=states,
                              feed_dict=pp.prepare_feed(sents, states),
-                             allowed_list=pp.allowed_batch(states)
+                             action_costs_list=pp.action_costs(states, sents, allowed_list),
+                             allowed_list=allowed_list
                              )
     sent_ids = []
     while True:
@@ -89,8 +111,8 @@ def score_batches(coord: Coordinator, pp: ParallelParse):
         batch = pp.batches.get()
 
         # Score states and move to next states, based on the scoring
-        batch_scores = pp.score_batch(batch.feed_dict, batch.sents, batch.states, batch.allowed_list)
-        pp.advance_batch(batch.ids, pp.states, batch_scores, batch.allowed_list)
+        batch_scores = pp.score_batch(batch)
+        pp.advance_batch(batch, batch_scores)
 
         # Put non-finished sentences back in scoring queue
         queue_again = [sent_id for sent_id in batch.ids

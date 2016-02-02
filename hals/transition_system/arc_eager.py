@@ -1,9 +1,12 @@
 import numpy as np
-
+from transition_system.base import AbstractReferencePolicy, AbstractTransitionSystem
 
 class Action:
     def __str__(self):
         return type(self).__name__
+
+    def edges_lost(self, conf):
+        raise NotImplementedError()
 
     def num_edges_lost(self, conf, R_gold):
         return sum(R_gold[i, j] for i, j in self.edges_lost(conf))
@@ -192,18 +195,17 @@ class ArcEagerParseState:
         return hash(tuple(self.stack)) + hash(tuple(self.buffer)) + hash(tuple(self.heads))
 
 
-class ArcEagerDynamicOracle:
-    is_optimal = True
+class ArcEagerDynamicOracle(AbstractReferencePolicy):
 
     def __call__(self, state, sent, allowed):
         costs = [ARC_EAGER[i].num_edges_lost(state, sent.adjacency) for i in allowed]
         return np.array(costs)
 
+    def is_optimal(self):
+        return True
 
-class ArcEager:
-    def __init__(self, num_labels):
-        self.num_labels = num_labels
 
+class ArcEager(AbstractTransitionSystem):
     def num_actions(self):
         return len(ARC_EAGER)
 
