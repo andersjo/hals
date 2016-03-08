@@ -92,7 +92,6 @@ class ParallelTrain(ParallelParse):
             t_sys.perform(batch.states[i], action)
 
 
-
 class ParallelPredict(ParallelParse):
     def prepare_feed(self, sents: List[Sentence], states: List[Any]):
         return self.parser.learner.prepare_feed_batch(sents, states)

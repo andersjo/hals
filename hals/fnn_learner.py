@@ -27,8 +27,13 @@ class FnnLearner:
 
         self.train_step = optimizer.apply_gradients(grads_and_vars)
 
+        self.merged_summaries = tf.merge_all_summaries()
+
         self.session = tf.Session()
         self.session.run(tf.initialize_all_variables())
+
+        self.summary_writer = tf.train.SummaryWriter("summaries", self.session.graph_def)
+
 
     def score_actions(self, sent, state, allowed):
         feed_dict = self.model.prepare_feed(sent, state)

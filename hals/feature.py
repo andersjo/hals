@@ -270,15 +270,23 @@ def make_hidden(input_layer, num_inputs, num_hidden) -> tf.Tensor:
 def make_output_and_loss(last_hidden, num_inputs, num_classes, gold_ph) -> [tf.Tensor, tf.Tensor, tf.Tensor]:
     with tf.name_scope('output'):
         w = tf.Variable(tf.truncated_normal([num_inputs, num_classes], stddev=0.1), name='w')
+        tf.histogram_summary("output weights", w)
+
         b = tf.Variable(tf.constant(0.1, dtype=tf.float32, shape=[num_classes]), name='b')
+        tf.histogram_summary("output biases", b)
+
         logits = tf.nn.xw_plus_b(last_hidden, w, b, name='act')
+        tf.histogram_summary("output logits", w)
 
     with tf.name_scope('loss'):
         losses = tf.nn.sigmoid_cross_entropy_with_logits(logits, gold_ph)
         loss = tf.reduce_sum(losses)
+        tf.scalar_summary("sigmoid cross entropy", loss)
 
     with tf.name_scope('pred'):
         pred = tf.arg_max(logits, 1)
+
+
     return loss, pred, logits
 
 
@@ -317,34 +325,6 @@ def make_zhang_simplified_model(feat_embeddings_by_ns, num_classes, num_hidden) 
     model.logits = logits
 
     return model
-
-
-def make_zhang_simplified_feature_template():
-    """
-    The feature template is based on the Zhang and Manning (2014) NN feature model.
-
-    Some adaptations were to account for the fact that the Zhang and Manning model is based on ArcStandard,
-    while this feature model assumes ArcEager.
-
-
-    :return:
-    """
-
-    roles = [TokenRole.S0, TokenRole.S1, TokenRole.S2,
-             TokenRole.S0_PARENT, TokenRole.S0_GRANDPARENT,
-             TokenRole.S0_CHILD_RIGHT, TokenRole.S0_CHILD_RIGHT_2,
-             TokenRole.S0_CHILD_LEFT, TokenRole.N0_CHILD_LEFT_2,
-             TokenRole.N0, TokenRole.N1, TokenRole.N2,
-             TokenRole.N0_CHILD_LEFT, TokenRole.N0_CHILD_LEFT_2]
-
-    nn_feature_model = []
-    for role in roles:
-        # Word features
-        nn_feature_model.append(EmbeddingBuilder(role, 'w'))
-        # Pos features
-        nn_feature_model.append(EmbeddingBuilder(role, 'p'))
-
-    return FeatureTemplate(nn_feature_model)
 
 
 def init_embeddings(corpus, ns_embedding_sizes, pretrained):

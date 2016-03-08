@@ -7,6 +7,7 @@ from feature import init_embeddings, make_zhang_simplified_model
 from fnn_learner import FnnLearner
 from learner import RandomLearner
 from sentences import Corpus, read_sentences
+from transition_parser.serial_parser import SerialParser
 from transition_parser.threaded_parser import ThreadedTransitionParser
 
 
@@ -30,9 +31,8 @@ def train(args):
     ns_embedding_sizes.update({'w': 100, 'p': 12})
 
     pretrained = {}
-    for ns_init in args.ns_init:
-        ns, filename = ns_init.split(":")
-        pretrained[ns] = pd.read_hdf(filename)
+    for ns, filename in args.ns_init:
+        pretrained[ns] = pd.read_hdf(str(filename))
         ns_embedding_sizes[ns] = pretrained[ns].shape[1]
 
     for ns_dim in args.ns_dim:
@@ -48,14 +48,17 @@ def train(args):
     t_sys = t_sys_cls(num_labels)
 
     # Build tensorflow model for learner
-    tf_model = make_zhang_simplified_model(feat_embeddings, t_sys.num_actions(), num_hidden=100)
+    tf_model = make_zhang_simplified_model(feat_embeddings, t_sys.num_actions(), num_hidden=200)
 
     # Initialize parser
     # random_learner = RandomLearner(t_sys.num_actions())
+
     fnn_learner = FnnLearner(tf_model,
                              clip_gradient=args.clip_gradient)
     # learner = random_learner
     learner = fnn_learner
 
+    # parser = SerialParser(t_sys, learner)
     parser = ThreadedTransitionParser(t_sys, learner, early_stop_after=args.early_stop_after)
     parser.fit(train_sents, dev_sents)
+
